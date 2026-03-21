@@ -1,0 +1,14 @@
+[package]
+name = "LEDCube-example-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.34", features = ["full"] }
+prost = "0.12"
+prost-types = "0.12"
+bytes = "1.5"
+cobs = "0.2"
+
+[build-dependencies]
+prost-build = "0.12"

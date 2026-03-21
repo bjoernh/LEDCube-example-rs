@@ -1,0 +1,15 @@
+# Rust
+/target/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.bak
+*.tmp
