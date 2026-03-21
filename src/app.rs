@@ -71,7 +71,7 @@ pub async fn run(mut conn: MatrixConnection) -> std::io::Result<()> {
             result = conn.read_message() => {
                 match result {
                     Ok(Some(msg)) => {
-                        let msg_type = MessageType::from_i32(msg.message_type).unwrap_or(MessageType::DefaultMessageType);
+                        let msg_type = MessageType::try_from(msg.message_type).unwrap_or(MessageType::DefaultMessageType);
                         
                         match msg_type {
                             MessageType::RegisterApp => {

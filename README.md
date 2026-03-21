@@ -39,13 +39,13 @@ If your matrixserver is running on a different machine, socket interface, or por
 cargo run -- 192.168.1.10:44093
 ```
 
-## 🧠 Project Architecture
+## Project Architecture
 
 - **`src/main.rs`**: Establishes the asynchronous Tokio runtime, parses CLI args for the IP/Port payload, and invokes `app::run`.
 - **`src/network.rs`**: Manages the `MatrixConnection` object. Implements the buffer loops reading data from the raw TCP stream, finding the COBS zero separators, and safely yielding decoded frames.
 - **`src/protocol.rs`**: Contains the `encode_message()` and `decode_message()` helper functions, bridging the COBS framing with the `prost` protobuf deserializer logic.
 - **`src/app.rs`**: The heartbeat of the application. Handles the initialization tasks, the select multiplexing for 30 FPS animation generation, and dynamic 3D-array population from user-defined effects.
 
-## 🤝 Next Steps
+## Next Steps
 
 You can build new animations directly inside `src/app.rs`'s `tokio::select!` interval tick loop. The multi-screen logic ensures your effect propagates across all cube faces effortlessly!
