@@ -2,8 +2,11 @@ use std::time::Duration;
 use tokio::time;
 use crate::network::MatrixConnection;
 use crate::protocol::matrixserver::{
-    MatrixServerMessage, MessageType, ScreenData, Status, ScreenInfo, screen_data::Encoding
+    MatrixServerMessage, MessageType, ScreenData, Status, ScreenInfo, screen_data::Encoding,
+    AppParamSchema
 };
+use crate::animation::{Animation, Rotation};
+use std::collections::HashMap;
 
 #[derive(PartialEq, Debug)]
 enum AppState {
@@ -12,7 +15,7 @@ enum AppState {
     Paused,
 }
 
-pub async fn run(mut conn: MatrixConnection) -> std::io::Result<()> {
+pub async fn run(mut conn: MatrixConnection, mut animation: Box<dyn Animation>, screen_rotations: HashMap<i32, Rotation>) -> std::io::Result<()> {
     let mut app_id = 0; 
     let mut state = AppState::Starting;
     let mut screens: Vec<ScreenInfo> = Vec::new();
@@ -23,7 +26,6 @@ pub async fn run(mut conn: MatrixConnection) -> std::io::Result<()> {
     conn.send_message(&reg_msg).await?;
 
     let mut tick_interval = time::interval(Duration::from_millis(33)); // ~30 FPS
-    let mut shift: u8 = 0;
 
     loop {
         tokio::select! {
@@ -32,30 +34,21 @@ pub async fn run(mut conn: MatrixConnection) -> std::io::Result<()> {
                     let mut screen_data_list = Vec::new();
                     
                     for screen in &screens {
-                        let num_pixels = (screen.width * screen.height) as usize;
-                        let mut frame_data = vec![0u8; num_pixels * 3];
-                        
-                        for y in 0..screen.height {
-                            for x in 0..screen.width {
-                                let i = (y * screen.width + x) as usize;
-                                // Add some spatial variation to the animation (diagonal sweep)
-                                let color_idx = (x + y) as u16;
-                                let r = ((color_idx + shift as u16) % 255) as u8;
-                                
-                                frame_data[i*3] = r;       
-                                frame_data[i*3 + 1] = 0;   
-                                frame_data[i*3 + 2] = 255u8.saturating_sub(r); 
-                            }
-                        }
-                        
                         let mut sd = ScreenData::default();
                         sd.screen_id = screen.screen_id;
-                        sd.frame_data = frame_data;
                         sd.encoding = Encoding::Rgb24bbp as i32;
+
+                        if let Some(&rotation) = screen_rotations.get(&screen.screen_id) {
+                            sd.frame_data = animation.render(screen, rotation);
+                        } else {
+                            // Send black frame for inactive screens
+                            sd.frame_data = vec![0u8; (screen.width * screen.height * 3) as usize];
+                        }
+                        
                         screen_data_list.push(sd);
                     }
 
-                    shift = shift.wrapping_add(5);
+                    animation.update();
 
                     let mut frame_msg = MatrixServerMessage::default();
                     frame_msg.message_type = MessageType::SetScreenFrame as i32;
@@ -83,6 +76,16 @@ pub async fn run(mut conn: MatrixConnection) -> std::io::Result<()> {
                                     info_req.message_type = MessageType::GetServerInfo as i32;
                                     info_req.app_id = app_id;
                                     conn.send_message(&info_req).await?;
+
+                                    // Send parameter schema
+                                    let mut schema_msg = MatrixServerMessage::default();
+                                    schema_msg.message_type = MessageType::AppParamSchema as i32;
+                                    schema_msg.app_id = app_id;
+                                    schema_msg.app_param_schema = Some(AppParamSchema {
+                                        app_name: "LEDCube-Rust-Fire".to_string(),
+                                        params: animation.get_schema(),
+                                    });
+                                    conn.send_message(&schema_msg).await?;
                                 } else {
                                     eprintln!("Registration failed with status: {:?}", msg.status);
                                     break;
@@ -109,6 +112,15 @@ pub async fn run(mut conn: MatrixConnection) -> std::io::Result<()> {
                             MessageType::AppKill => {
                                 println!("Server requested Kill. Shutting down.");
                                 break;
+                            }
+                            MessageType::SetAppParam => {
+                                if let Some(update) = msg.app_param_update {
+                                    animation.handle_param(&update);
+                                }
+                            }
+                            MessageType::GetAppParams => {
+                                // Normally we'd send current values back, but for now we'll just log
+                                println!("Server requested current parameter values.");
                             }
                             _ => {}
                         }
