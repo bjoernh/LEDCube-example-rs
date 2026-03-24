@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 use std::time::Duration;
 use tokio::time;
 use crate::network::MatrixConnection;
@@ -5,8 +7,8 @@ use crate::protocol::matrixserver::{
     MatrixServerMessage, MessageType, ScreenData, Status, ScreenInfo, screen_data::Encoding,
     AppParamSchema
 };
-use crate::animation::{Animation, Rotation};
-use std::collections::HashMap;
+use crate::animation::{AnimationType, AnimationRegistry, Rotation};
+use std::collections::{HashMap, HashSet};
 
 #[derive(PartialEq, Debug)]
 enum AppState {
@@ -15,10 +17,27 @@ enum AppState {
     Paused,
 }
 
-pub async fn run(mut conn: MatrixConnection, mut animation: Box<dyn Animation>, screen_rotations: HashMap<i32, Rotation>) -> std::io::Result<()> {
+/// Configuration for a single screen's animation and rotation
+#[derive(Clone)]
+pub struct ScreenConfig {
+    pub animation_type: AnimationType,
+    pub rotation: Rotation,
+}
+
+pub async fn run(
+    mut conn: MatrixConnection,
+    mut registry: AnimationRegistry,
+    screen_configs: HashMap<i32, ScreenConfig>,
+) -> std::io::Result<()> {
     let mut app_id = 0; 
     let mut state = AppState::Starting;
     let mut screens: Vec<ScreenInfo> = Vec::new();
+
+    // Compute active animation types from screen configuration (once at startup)
+    let active_types: HashSet<AnimationType> = screen_configs.values()
+        .map(|config| config.animation_type)
+        .collect();
+    registry.set_active_types(active_types);
 
     println!("Sending RegisterApp...");
     let mut reg_msg = MatrixServerMessage::default();
@@ -32,23 +51,33 @@ pub async fn run(mut conn: MatrixConnection, mut animation: Box<dyn Animation>, 
             _ = tick_interval.tick() => {
                 if state == AppState::Running && !screens.is_empty() {
                     let mut screen_data_list = Vec::new();
-                    
+
+                    // Update and render for each screen
                     for screen in &screens {
                         let mut sd = ScreenData::default();
                         sd.screen_id = screen.screen_id;
                         sd.encoding = Encoding::Rgb24bbp as i32;
 
-                        if let Some(&rotation) = screen_rotations.get(&screen.screen_id) {
-                            sd.frame_data = animation.render(screen, rotation);
-                        } else {
-                            // Send black frame for inactive screens
-                            sd.frame_data = vec![0u8; (screen.width * screen.height * 3) as usize];
+                        match screen_configs.get(&screen.screen_id) {
+                            Some(config) => {
+                                // Update this animation type with screen info (for initialization)
+                                registry.update_with_screen(config.animation_type, Some(screen));
+                                
+                                // Render with configured rotation
+                                sd.frame_data = registry.render(
+                                    config.animation_type,
+                                    screen,
+                                    config.rotation,
+                                );
+                            }
+                            None => {
+                                // Unmapped screens stay black (explicit opt-in)
+                                sd.frame_data = vec![0u8; (screen.width * screen.height * 3) as usize];
+                            }
                         }
-                        
+
                         screen_data_list.push(sd);
                     }
-
-                    animation.update();
 
                     let mut frame_msg = MatrixServerMessage::default();
                     frame_msg.message_type = MessageType::SetScreenFrame as i32;
@@ -77,13 +106,13 @@ pub async fn run(mut conn: MatrixConnection, mut animation: Box<dyn Animation>, 
                                     info_req.app_id = app_id;
                                     conn.send_message(&info_req).await?;
 
-                                    // Send parameter schema
+                                    // Send parameter schema (only active animations)
                                     let mut schema_msg = MatrixServerMessage::default();
                                     schema_msg.message_type = MessageType::AppParamSchema as i32;
                                     schema_msg.app_id = app_id;
                                     schema_msg.app_param_schema = Some(AppParamSchema {
-                                        app_name: "LEDCube-Rust-Fire".to_string(),
-                                        params: animation.get_schema(),
+                                        app_name: "LEDCube-Rust-Multi".to_string(),
+                                        params: registry.get_active_schemas(),
                                     });
                                     conn.send_message(&schema_msg).await?;
                                 } else {
@@ -115,7 +144,7 @@ pub async fn run(mut conn: MatrixConnection, mut animation: Box<dyn Animation>, 
                             }
                             MessageType::SetAppParam => {
                                 if let Some(update) = msg.app_param_update {
-                                    animation.handle_param(&update);
+                                    registry.handle_param(&update);
                                 }
                             }
                             MessageType::GetAppParams => {
