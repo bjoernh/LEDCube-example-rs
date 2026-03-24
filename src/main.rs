@@ -23,7 +23,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Build animation registry with shared instances
     let mut registry = AnimationRegistry::new();
-    registry.register_fire(); // One FireAnimation instance for ALL fire screens
+    registry.register_fire();     // One FireAnimation instance for ALL fire screens
+    registry.register_night_sky(); // Night sky for top screen
 
     // Configure which animation goes on each screen
     let mut screen_configs: HashMap<i32, ScreenConfig> = HashMap::new();
@@ -58,12 +59,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
     ); // Left
 
-    // Screen 4 (top) - NOT configured = stays black (explicit opt-in)
-    // To add later:
-    // screen_configs.insert(4, ScreenConfig {
-    //     animation_type: AnimationType::Rain,
-    //     rotation: Rotation::Rotate0,
-    // });
+    // Screen 4 (top) - Night sky with twinkling stars
+    screen_configs.insert(
+        4,
+        ScreenConfig {
+            animation_type: AnimationType::NightSky,
+            rotation: Rotation::Rotate0,
+        },
+    );
 
     let stream = MatrixConnection::connect(&addr).await;
 
